@@ -105,3 +105,55 @@ def delete_stock_movement(db: Session, movement_id: int):
     db.delete(movement)
     db.commit()
     return {"detail": "Stock movement deleted successfully"}
+
+
+def create_store(db: Session, store: schemas.StoreCreate):
+    db_store = models.Store(name=store.name)
+    db.add(db_store)
+    db.commit()
+    db.refresh(db_store)
+    return db_store
+
+def get_stores(db: Session):
+    return db.query(models.Store).all()
+
+def create_stock_movement(db: Session, movement: schemas.StockMovementCreate):
+    # Check product and store
+    product = db.query(models.Product).filter(models.Product.id == movement.product_id).first()
+    store = db.query(models.Store).filter(models.Store.id == movement.store_id).first()
+
+    if not product or not store:
+        raise HTTPException(status_code=404, detail="Product or Store not found")
+
+    # Get or create StoreInventory
+    inventory = db.query(models.StoreInventory).filter_by(
+        store_id=movement.store_id, product_id=movement.product_id
+    ).first()
+
+    if not inventory:
+        inventory = models.StoreInventory(
+            store_id=movement.store_id, product_id=movement.product_id, quantity=0
+        )
+        db.add(inventory)
+        db.commit()
+        db.refresh(inventory)
+
+    # Update quantity
+    if movement.type == "stock_in":
+        inventory.quantity += movement.quantity
+    elif movement.type in ["sale", "manual_removal"]:
+        if inventory.quantity < movement.quantity:
+            raise HTTPException(status_code=400, detail="Not enough stock")
+        inventory.quantity -= movement.quantity
+
+    # Create stock movement log
+    db_movement = models.StockMovement(
+        store_id=movement.store_id,
+        product_id=movement.product_id,
+        type=movement.type,
+        quantity=movement.quantity
+    )
+    db.add(db_movement)
+    db.commit()
+    db.refresh(db_movement)
+    return db_movement

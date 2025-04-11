@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, init_db
-import app.models
+from app import models
 from app import crud
 from app import schemas
+# import datetime
 
 app = FastAPI()
 
@@ -40,9 +41,33 @@ async def create_stock_movement(
 ):
     return crud.create_stock_movement(db=db, movement=movement)
 
+from datetime import datetime
+
 @app.get("/stock-movements/")
-def get_stock_movements(db: Session = Depends(get_db)):
-    return crud.get_stock_movements(db)
+def get_stock_movements(
+    db: Session = Depends(get_db),
+    store_id: int = None,
+    product_id: int = None,
+    start_date: str = None,  # Change to string
+    end_date: str = None  # Change to string
+):
+    query = db.query(models.StockMovement)
+    
+    if store_id:
+        query = query.filter(models.StockMovement.store_id == store_id)
+    if product_id:
+        query = query.filter(models.StockMovement.product_id == product_id)
+    if start_date and end_date:
+        # Convert string to datetime objects
+        try:
+            start_date = datetime.fromisoformat(start_date)  # Use ISO format
+            end_date = datetime.fromisoformat(end_date)
+            query = query.filter(models.StockMovement.timestamp.between(start_date, end_date))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use 'YYYY-MM-DD'.")
+    
+    return query.all()
+
 
 
 from app.routes import router as inventory_router
@@ -79,3 +104,27 @@ def delete_stock_movement(movement_id: int, db: Session = Depends(get_db)):
     if not db_movement:
         raise HTTPException(status_code=404, detail="Stock movement not found")
     return db_movement
+
+@app.post("/stores/")
+def create_store(store: schemas.StoreCreate, db: Session = Depends(get_db)):
+    return crud.create_store(db, store)
+
+@app.get("/stores/", response_model=List[schemas.Store])
+def get_stores(db: Session = Depends(get_db)):
+    return crud.get_stores(db)
+
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Security
+import secrets
+
+security = HTTPBasic()
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, "admin")
+    correct_password = secrets.compare_digest(credentials.password, "admin123")
+    if not (correct_username and correct_password):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+@app.get("/stores/", dependencies=[Depends(authenticate)])
+def get_stores(db: Session = Depends(get_db)):
+    ...
