@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime 
 
 class ProductCreate(BaseModel):
     name: Optional[str] = None
@@ -12,16 +13,6 @@ class Product(ProductCreate):
     class Config:
         orm_mode = True
 
-class StockMovementCreate(BaseModel):
-    product_id: int
-    quantity: Optional[int] = None  # Optional for update
-    type: Optional[str] = None      # Optional for update
-
-class StockMovement(StockMovementCreate):
-    id: int
-
-    class Config:
-        orm_mode = True
 
 class StoreBase(BaseModel):
     name: str
@@ -40,6 +31,7 @@ class StockMovementCreate(BaseModel):
     store_id: int
     type: str
     quantity: int
+    timestamp: Optional[datetime] = None  # ← Add this
 
 class StockMovement(StockMovementCreate):
     id: int

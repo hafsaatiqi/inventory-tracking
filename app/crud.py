@@ -14,33 +14,6 @@ def get_products(db: Session):
     return db.query(models.Product).all()
 
 
-def create_stock_movement(db: Session, movement: schemas.StockMovementCreate):
-    # Check if the product exists
-    product = db.query(models.Product).filter(models.Product.id == movement.product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    # Update stock based on movement type
-    if movement.type == "stock_in":
-        product.quantity += movement.quantity
-    elif movement.type in ["sale", "manual_removal"]:
-        if product.quantity < movement.quantity:
-            raise HTTPException(status_code=400, detail="Not enough stock available")
-        product.quantity -= movement.quantity
-    else:
-        raise HTTPException(status_code=400, detail="Invalid movement type")
-
-    # Create stock movement record
-    db_movement = models.StockMovement(
-        product_id=movement.product_id,
-        type=movement.type,
-        quantity=movement.quantity
-    )
-    db.add(db_movement)
-    db.commit()
-    db.refresh(db_movement)
-    return db_movement
-
 def get_stock_movements(db: Session):
     return db.query(models.StockMovement).all()
 

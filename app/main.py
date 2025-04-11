@@ -4,7 +4,7 @@ from app.database import SessionLocal, init_db
 from app import models
 from app import crud
 from app import schemas
-# import datetime
+from datetime import datetime
 
 app = FastAPI()
 
@@ -60,8 +60,15 @@ def get_stock_movements(
     if start_date and end_date:
         # Convert string to datetime objects
         try:
-            start_date = datetime.fromisoformat(start_date)  # Use ISO format
-            end_date = datetime.fromisoformat(end_date)
+            def parse_date(date_str):
+                try:
+                    return datetime.strptime(date_str, "%Y-%m-%d")
+                except:
+                    raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+            start_date = parse_date(start_date)
+            end_date = parse_date(end_date)
+
             query = query.filter(models.StockMovement.timestamp.between(start_date, end_date))
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use 'YYYY-MM-DD'.")
@@ -69,10 +76,6 @@ def get_stock_movements(
     return query.all()
 
 
-
-from app.routes import router as inventory_router
-
-app.include_router(inventory_router)
 
 @app.put("/products/{product_id}", response_model=schemas.Product)
 def update_product(product_id: int, product: schemas.ProductCreate, db: Session = Depends(get_db)):
@@ -109,9 +112,7 @@ def delete_stock_movement(movement_id: int, db: Session = Depends(get_db)):
 def create_store(store: schemas.StoreCreate, db: Session = Depends(get_db)):
     return crud.create_store(db, store)
 
-@app.get("/stores/", response_model=List[schemas.Store])
-def get_stores(db: Session = Depends(get_db)):
-    return crud.get_stores(db)
+
 
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi import Security
@@ -125,6 +126,8 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-@app.get("/stores/", dependencies=[Depends(authenticate)])
-def get_stores(db: Session = Depends(get_db)):
-    ...
+@app.get("/stores/", response_model=List[schemas.Store])
+def get_stores(db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(security)):
+    authenticate(credentials)
+    return crud.get_stores(db)
+
