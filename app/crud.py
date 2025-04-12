@@ -119,9 +119,14 @@ def create_stock_movement(db: Session, movement: schemas.StockMovementCreate):
         # Update quantity based on movement type
         if movement.type == "stock_in":
             inventory.quantity += movement.quantity
-        elif movement.type in ["sale", "manual_removal"]:
+        elif movement.type == "sale":
             if inventory.quantity < movement.quantity:
-                raise HTTPException(status_code=400, detail="Not enough stock")
+                raise HTTPException(status_code=400, detail="Not enough stock for sale")
+            inventory.quantity -= movement.quantity
+
+        elif movement.type == "manual_removal":
+            if inventory.quantity < movement.quantity:
+                raise HTTPException(status_code=400, detail="Cannot remove more than available stock")
             inventory.quantity -= movement.quantity
 
         # Create the movement record (let SQLAlchemy handle created_at)

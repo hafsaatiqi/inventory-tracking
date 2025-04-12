@@ -23,10 +23,36 @@ def get_db():
 def read_root():
     return {"message": "Inventory Tracking API"}
 
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Security
+import secrets
+from fastapi import Request
 
+security = HTTPBasic()
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, "admin")
+    correct_password = secrets.compare_digest(credentials.password, "admin123")
+    if not (correct_username and correct_password):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+  
 
 @app.post("/products/")
-def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)):
+def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(security)):
+    authenticate(credentials)  
     return crud.create_product(db, product)
 
 from typing import List
@@ -39,20 +65,26 @@ from typing import List
 @app.post("/stock-movements/")
 async def create_stock_movement(
     movement: schemas.StockMovementCreate,  # This will be passed in the request body
-    db: Session = Depends(get_db)  # Database session injected by FastAPI
+    db: Session = Depends(get_db),  # Database session injected by FastAPI
+    credentials: HTTPBasicCredentials = Depends(security)
 ):
+    authenticate(credentials)  
+
     return crud.create_stock_movement(db=db, movement=movement)
 
 from datetime import datetime
 
 @app.get("/stock-movements/")
+@limiter.limit("10/minute")
 def get_stock_movements(
+    request: Request,
     db: Session = Depends(get_db),
     store_id: int = None,
     product_id: int = None,
     start_date: str = None,  # Change to string
     end_date: str = None  # Change to string
 ):
+
     query = db.query(models.StockMovement)
     
     if store_id:
@@ -111,23 +143,11 @@ def get_stock_movements(
 #     return db_movement
 
 @app.post("/stores/")
-def create_store(store: schemas.StoreCreate, db: Session = Depends(get_db)):
+def create_store(store: schemas.StoreCreate, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(security)):
+    authenticate(credentials)  
     return crud.create_store(db, store)
 
 
-
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi import Security
-import secrets
-# from fastapi import Request
-
-security = HTTPBasic()
-
-def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, "admin")
-    correct_password = secrets.compare_digest(credentials.password, "admin123")
-    if not (correct_username and correct_password):
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
 @app.get("/stores/", response_model=List[schemas.Store])
 def get_stores(db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(security)):
@@ -135,20 +155,8 @@ def get_stores(db: Session = Depends(get_db), credentials: HTTPBasicCredentials 
     return crud.get_stores(db)
 
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from fastapi import Request
-from fastapi.responses import JSONResponse
 
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
 
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
-
-from slowapi.extension import Limiter
 
 @app.get("/products/")
 @limiter.limit("10/minute") 
@@ -160,6 +168,6 @@ def get_products(request: Request, skip: int = 0, limit: int = 100, db: Session 
 def get_store_inventory(store_id: int, db: Session = Depends(get_db)):
     return crud.get_inventory_by_store(db, store_id)
 
-@app.get("/products/{product_id}/inventory", response_model=List[schemas.InventoryDisplay])
+@app.get("/products/{product_id}/inventory", response_model=List[schemas.ProductInventoryDisplay])
 def get_product_inventory(product_id: int, db: Session = Depends(get_db)):
     return crud.get_inventory_by_product(db, product_id)

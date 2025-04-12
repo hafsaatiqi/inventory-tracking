@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import main
+from app.main import app
 from app.database import Base, get_db
 
 # Test database (SQLite for simplicity)

@@ -43,6 +43,8 @@ class StockMovement(StockMovementCreate):
 from pydantic import BaseModel
 
 class InventoryDisplay(BaseModel):
+    # store_id: int
+    # store_name: str
     product_id: int
     product_name: str
     quantity: int
