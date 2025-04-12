@@ -4,14 +4,14 @@ from fastapi import HTTPException
 
 
 def create_product(db: Session, product: schemas.ProductCreate):
-    db_product = models.Product(name=product.name, price=product.price, quantity=product.quantity)
+    db_product = models.Product(name=product.name, price=product.price)
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
     return db_product
 
-def get_products(db: Session):
-    return db.query(models.Product).all()
+def get_products(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.Product).offset(skip).limit(limit).all()
 
 
 def get_stock_movements(db: Session):
@@ -32,8 +32,8 @@ def update_product(db: Session, product_id: int, product: schemas.ProductCreate)
         db_product.name = product.name
     if product.price is not None:
         db_product.price = product.price
-    if product.quantity is not None:
-        db_product.quantity = product.quantity
+    # if product.quantity is not None:
+    #     db_product.quantity = product.quantity
 
     db.commit()
     db.refresh(db_product)
@@ -90,43 +90,100 @@ def create_store(db: Session, store: schemas.StoreCreate):
 def get_stores(db: Session):
     return db.query(models.Store).all()
 
+
+from sqlalchemy.exc import SQLAlchemyError
+
 def create_stock_movement(db: Session, movement: schemas.StockMovementCreate):
-    # Check product and store
-    product = db.query(models.Product).filter(models.Product.id == movement.product_id).first()
-    store = db.query(models.Store).filter(models.Store.id == movement.store_id).first()
+    try:
+        # Verify product and store exist
+        if not db.query(models.Product).filter_by(id=movement.product_id).first():
+            raise HTTPException(status_code=404, detail="Product not found")
+        if not db.query(models.Store).filter_by(id=movement.store_id).first():
+            raise HTTPException(status_code=404, detail="Store not found")
 
-    if not product or not store:
-        raise HTTPException(status_code=404, detail="Product or Store not found")
+        # Handle inventory update
+        inventory = db.query(models.StoreInventory).filter_by(
+            store_id=movement.store_id,
+            product_id=movement.product_id
+        ).with_for_update().first()
 
-    # Get or create StoreInventory
-    inventory = db.query(models.StoreInventory).filter_by(
-        store_id=movement.store_id, product_id=movement.product_id
-    ).first()
+        if not inventory:
+            inventory = models.StoreInventory(
+                store_id=movement.store_id,
+                product_id=movement.product_id,
+                quantity=0
+            )
+            db.add(inventory)
+            db.flush()
 
-    if not inventory:
-        inventory = models.StoreInventory(
-            store_id=movement.store_id, product_id=movement.product_id, quantity=0
+        # Update quantity based on movement type
+        if movement.type == "stock_in":
+            inventory.quantity += movement.quantity
+        elif movement.type in ["sale", "manual_removal"]:
+            if inventory.quantity < movement.quantity:
+                raise HTTPException(status_code=400, detail="Not enough stock")
+            inventory.quantity -= movement.quantity
+
+        # Create the movement record (let SQLAlchemy handle created_at)
+        db_movement = models.StockMovement(
+            product_id=movement.product_id,
+            store_id=movement.store_id,
+            type=movement.type,
+            quantity=movement.quantity
         )
-        db.add(inventory)
+        db.add(db_movement)
         db.commit()
-        db.refresh(inventory)
+        db.refresh(db_movement)
+        return db_movement
 
-    # Update quantity
-    if movement.type == "stock_in":
-        inventory.quantity += movement.quantity
-    elif movement.type in ["sale", "manual_removal"]:
-        if inventory.quantity < movement.quantity:
-            raise HTTPException(status_code=400, detail="Not enough stock")
-        inventory.quantity -= movement.quantity
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # Create stock movement log
-    db_movement = models.StockMovement(
-        store_id=movement.store_id,
-        product_id=movement.product_id,
-        type=movement.type,
-        quantity=movement.quantity
-    )
-    db.add(db_movement)
-    db.commit()
-    db.refresh(db_movement)
-    return db_movement
+def get_inventory_by_store(db: Session, store_id: int):
+    inventory = db.query(models.StoreInventory).filter(models.StoreInventory.store_id == store_id).all()
+    
+    if not inventory:
+        raise HTTPException(status_code=404, detail="No inventory found for this store")
+
+    result = []
+    for item in inventory:
+        product = db.query(models.Product).filter(models.Product.id == item.product_id).first()
+        result.append({
+            "product_id": item.product_id,
+            "product_name": product.name,
+            "quantity": item.quantity
+        })
+    return result
+
+
+def get_inventory_by_product(db: Session, product_id: int):
+    """Get current inventory levels for a product across all stores"""
+    # Check if product exists
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Get inventory across all stores
+    inventory = db.query(models.StoreInventory).filter(
+        models.StoreInventory.product_id == product_id
+    ).all()
+    
+    if not inventory:
+        raise HTTPException(
+            status_code=404,
+            detail="No inventory found for this product in any store"
+        )
+    
+    result = []
+    for item in inventory:
+        store = db.query(models.Store).filter(models.Store.id == item.store_id).first()
+        result.append({
+            "store_id": item.store_id,
+            "store_name": store.name,
+            "product_id": item.product_id,
+            "product_name": product.name,
+            "quantity": item.quantity
+        })
+    
+    return result

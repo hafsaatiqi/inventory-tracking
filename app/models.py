@@ -10,7 +10,7 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     price = Column(Float, nullable=False)
-    quantity = Column(Integer, default=0)
+    # quantity = Column(Integer, default=0)
     movements = relationship("StockMovement", back_populates="product")
     inventories = relationship("StoreInventory", back_populates="product")
 
