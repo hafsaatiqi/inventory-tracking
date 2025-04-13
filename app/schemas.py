@@ -61,3 +61,16 @@ class ProductInventoryDisplay(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class AuditLog(BaseModel):
+    id: int
+    username: str
+    action: str
+    target_table: str
+    target_id: int | None = None
+    details: str | None = None
+    timestamp: datetime
+
+    class Config:
+        orm_mode = True

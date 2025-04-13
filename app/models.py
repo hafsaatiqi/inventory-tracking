@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from .database import Base
 from sqlalchemy.sql import func
 from sqlalchemy import DateTime
+from datetime import datetime
 
 class Product(Base):
     __tablename__ = "products"
@@ -57,3 +58,14 @@ class StockMovement(Base):
 
     product = relationship("Product", back_populates="movements")
     store = relationship("Store", back_populates="movements")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # e.g., "CREATE_PRODUCT"
+    target_table = Column(String, nullable=False)  # e.g., "products"
+    target_id = Column(Integer, nullable=True)  # ID of affected row
+    details = Column(String)  # Any extra info you want to log
+    timestamp = Column(DateTime, default=datetime.utcnow)

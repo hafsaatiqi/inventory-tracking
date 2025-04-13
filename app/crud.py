@@ -192,3 +192,21 @@ def get_inventory_by_product(db: Session, product_id: int):
         })
     
     return result
+
+def create_audit_log(
+    db: Session,
+    username: str,
+    action: str,
+    target_table: str,
+    target_id: int = None,
+    details: str = None,
+):
+    log = models.AuditLog(
+        username=username,
+        action=action,
+        target_table=target_table,
+        target_id=target_id,
+        details=details
+    )
+    db.add(log)
+    db.commit()

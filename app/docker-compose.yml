@@ -1,0 +1,17 @@
+version: "3"
+
+services:
+  app:
+    image: fastapi-inventory   # Image name built earlier
+    ports:
+      - "8000:8000"            # Map the container's port 8000 to local port 8000
+    deploy:
+      replicas: 3              # This will create 3 instances of your app
+    networks:
+      - app-network
+    environment:
+      - HOSTNAME=${HOSTNAME}
+
+networks:
+  app-network:
+    driver: bridge

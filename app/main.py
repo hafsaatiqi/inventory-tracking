@@ -19,9 +19,12 @@ def get_db():
     finally:
         db.close()
 
+import os
+ 
 @app.get("/")
 def read_root():
-    return {"message": "Inventory Tracking API"}
+    container_id = os.getenv("HOSTNAME")
+    return {"message": f"Inventory Tracking API container {container_id}"}
 
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi import Security
@@ -50,10 +53,21 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
   
 
-@app.post("/products/")
+@app.post("/products/")  
 def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(security)):
     authenticate(credentials)  
-    return crud.create_product(db, product)
+    db_product = crud.create_product(db, product)
+
+    crud.create_audit_log(
+        db=db,
+        username=credentials.username,
+        action="CREATE_PRODUCT",
+        target_table="products",
+        target_id=db_product.id,
+        details=f"Created product '{product.name}'",
+    )
+
+    return db_product
 
 from typing import List
 
@@ -64,13 +78,24 @@ from typing import List
 # app/main.py
 @app.post("/stock-movements/")
 async def create_stock_movement(
-    movement: schemas.StockMovementCreate,  # This will be passed in the request body
-    db: Session = Depends(get_db),  # Database session injected by FastAPI
+    movement: schemas.StockMovementCreate,
+    db: Session = Depends(get_db),
     credentials: HTTPBasicCredentials = Depends(security)
 ):
     authenticate(credentials)  
 
-    return crud.create_stock_movement(db=db, movement=movement)
+    db_movement = crud.create_stock_movement(db=db, movement=movement)
+
+    crud.create_audit_log(
+        db=db,
+        username=credentials.username,
+        action="CREATE_STOCK_MOVEMENT",
+        target_table="stock_movements",
+        target_id=db_movement.id,
+        details=f"Created stock movement: {movement.type} of product ID {movement.product_id}, quantity {movement.quantity}"
+    )
+
+    return db_movement
 
 from datetime import datetime
 
@@ -145,7 +170,19 @@ def get_stock_movements(
 @app.post("/stores/")
 def create_store(store: schemas.StoreCreate, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(security)):
     authenticate(credentials)  
-    return crud.create_store(db, store)
+    db_store = crud.create_store(db, store)
+
+    crud.create_audit_log(
+        db=db,
+        username=credentials.username,
+        action="CREATE_STORE",
+        target_table="stores",
+        target_id=db_store.id,
+        details=f"Created store '{store.name}'"
+    )
+
+    return db_store
+
 
 
 
@@ -164,10 +201,44 @@ def get_products(request: Request, skip: int = 0, limit: int = 100, db: Session 
     return crud.get_products(db=db, skip=skip, limit=limit)
 
 
+# @app.get("/inventory/{store_id}", response_model=list[schemas.InventoryDisplay])
+# def get_store_inventory(store_id: int, db: Session = Depends(get_db)):
+#     return crud.get_inventory_by_store(db, store_id)
+
+from app.redis_client import redis_client  # ⬅️ ADD THIS at the top of your file
+
 @app.get("/inventory/{store_id}", response_model=list[schemas.InventoryDisplay])
 def get_store_inventory(store_id: int, db: Session = Depends(get_db)):
-    return crud.get_inventory_by_store(db, store_id)
+    cache_key = f"inventory:store:{store_id}"
+    cached_inventory = redis_client.get(cache_key)
+
+    if cached_inventory:
+        print("FROM CACHE")
+        import json
+        return json.loads(cached_inventory)  # Convert string back to Python list
+
+    inventory = crud.get_inventory_by_store(db, store_id)
+
+    # Save to Redis cache for 60 seconds
+    import json
+    redis_client.set(cache_key, json.dumps(inventory), ex=60)
+    print("FROM DATABASE")
+    return inventory
+
 
 @app.get("/products/{product_id}/inventory", response_model=List[schemas.ProductInventoryDisplay])
 def get_product_inventory(product_id: int, db: Session = Depends(get_db)):
-    return crud.get_inventory_by_product(db, product_id)
+    cache_key = f"inventory:product:{product_id}"
+    cached_inventory = redis_client.get(cache_key)
+
+    if cached_inventory:
+        print("FROM CACHE")
+        import json
+        return json.loads(cached_inventory)
+
+    inventory = crud.get_inventory_by_product(db, product_id)
+
+    import json
+    redis_client.set(cache_key, json.dumps(inventory), ex=60)
+    print("FROM DATABASE")
+    return inventory
